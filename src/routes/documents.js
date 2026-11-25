@@ -49,7 +49,7 @@ async function sendProductLabelsPdf(_req, res) {
   const { buildLabelsPdf } = require("../utils/labelPdf");
   const pdf = await buildLabelsPdf(labels);
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", 'attachment; filename="product-barcodes.pdf"');
+  res.setHeader("Content-Disposition", 'attachment; filename="product-qrcodes.pdf"');
   res.send(pdf);
 }
 
