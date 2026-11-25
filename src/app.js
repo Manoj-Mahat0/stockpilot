@@ -20,6 +20,7 @@ const siteRoutes = require("./routes/sites");
 const entryRoutes = require("./routes/entries");
 const siteStockRoutes = require("./routes/siteStock");
 const documentRoutes = require("./routes/documents");
+const transferRoutes = require("./routes/transfers");
 
 const app = express();
 
@@ -70,6 +71,7 @@ app.use("/api/sites", siteRoutes);
 app.use("/api/entries", entryRoutes);
 app.use("/api/site-stock", siteStockRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/transfers", transferRoutes);
 app.use("/api/barcodes", barcodeRoutes);
 app.use("/api/audits", auditRoutes);
 app.use("/api/dashboard", dashboardRoutes);

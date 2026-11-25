@@ -62,6 +62,15 @@ async function createEntry({
     throw new AppError("Shop users can only post to shop sites", 403);
   }
 
+  // Shop cannot free-inward — only receive factory transfer batch via QR
+  if (txnType === "INWARD" && site.type === "SHOP" && user.role === "SHOP") {
+    throw new AppError(
+      "Shop receive only via factory transfer QR. Scan the batch QR to inward.",
+      403,
+      "TRANSFER_QR_REQUIRED"
+    );
+  }
+
   if (txnType === "INWARD" && !user.canInward && user.role !== "ADMIN") {
     throw new AppError("Inward not permitted", 403);
   }
@@ -69,7 +78,8 @@ async function createEntry({
     throw new AppError("Outward not permitted", 403);
   }
 
-  if (txnType === "OUTWARD" && site.type === "FACTORY") {
+  const isFactoryDispatch = txnType === "OUTWARD" && site.type === "FACTORY";
+  if (isFactoryDispatch) {
     if (!destinationSiteId) throw new AppError("Destination shop required", 400);
     const dest = await prisma.site.findUnique({ where: { id: destinationSiteId } });
     if (!dest || dest.type !== "SHOP" || !dest.isActive) {
@@ -100,7 +110,7 @@ async function createEntry({
         },
       },
       include: {
-        lines: { include: { product: true } },
+        lines: { include: { product: { include: { barcodes: true } } } },
         site: true,
         destinationSite: true,
         performedBy: true,
@@ -120,25 +130,19 @@ async function createEntry({
           weightDelta: weight,
         });
       } else {
+        // Deduct from source only. Factory→Shop credits shop on RECEIVE, not here.
         await applyDelta(tx, {
           siteId,
           productId: line.productId,
           qtyDelta: -qty,
           weightDelta: -weight,
         });
-        if (site.type === "FACTORY" && destinationSiteId) {
-          await applyDelta(tx, {
-            siteId: destinationSiteId,
-            productId: line.productId,
-            qtyDelta: qty,
-            weightDelta: weight,
-          });
-        }
       }
     }
 
     let document = null;
-    const shouldChallan = txnType === "OUTWARD" && site.type === "FACTORY";
+    let batch = null;
+    const shouldChallan = isFactoryDispatch;
     const shouldShopDoc = txnType === "OUTWARD" && site.type === "SHOP";
 
     if (shouldChallan || shouldShopDoc) {
@@ -151,11 +155,12 @@ async function createEntry({
       const snapshot = entry.lines.map((l) => {
         const amount = Number(l.quantity) * Number(l.rate || 0);
         subtotal += amount;
+        const primaryBc = l.product.barcodes?.find((b) => b.isPrimary) || l.product.barcodes?.[0];
         return {
           productId: l.productId,
           sku: l.product.sku,
           name: l.product.name,
-          barcode: l.barcode,
+          barcode: l.barcode || primaryBc?.value || null,
           quantity: l.quantity,
           weight: l.weight,
           rate: l.rate,
@@ -187,7 +192,41 @@ async function createEntry({
       });
     }
 
-    return { entry, document };
+    if (isFactoryDispatch) {
+      const batchNo = await allocateDocumentNo("BAT", "BAT", tx);
+      const qrValue = `SP-BATCH-${batchNo}`;
+      const lineSnapshot = entry.lines.map((l) => {
+        const primaryBc = l.product.barcodes?.find((b) => b.isPrimary) || l.product.barcodes?.[0];
+        return {
+          productId: l.productId,
+          sku: l.product.sku,
+          name: l.product.name,
+          barcode: l.barcode || primaryBc?.value || null,
+          quantity: Number(l.quantity),
+          weight: Number(l.weight || 0),
+        };
+      });
+
+      batch = await tx.transferBatch.create({
+        data: {
+          batchNo,
+          qrValue,
+          fromSiteId: siteId,
+          toSiteId: destinationSiteId,
+          status: "PENDING",
+          stockEntryId: entry.id,
+          lineSnapshot,
+          remarks: remarks || null,
+          createdById: user.id,
+        },
+        include: {
+          fromSite: true,
+          toSite: true,
+        },
+      });
+    }
+
+    return { entry, document, batch };
   });
 }
 

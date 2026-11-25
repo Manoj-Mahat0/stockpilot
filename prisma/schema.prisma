@@ -29,6 +29,12 @@ enum DocType {
   INVOICE
 }
 
+enum TransferBatchStatus {
+  PENDING
+  RECEIVED
+  CANCELLED
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -142,6 +148,8 @@ model User {
   notifications     Notification[]
   activityLogs      ActivityLog[]
   refreshTokens     RefreshToken[]
+  transferBatchesCreated  TransferBatch[] @relation("TransferCreatedBy")
+  transferBatchesReceived TransferBatch[] @relation("TransferReceivedBy")
 }
 
 model Site {
@@ -159,6 +167,31 @@ model Site {
   entries            StockEntry[]       @relation("EntrySite")
   incomingTransfers  StockEntry[]       @relation("EntryDestination")
   documents          Document[]
+  transfersFrom      TransferBatch[]    @relation("TransferFrom")
+  transfersTo        TransferBatch[]    @relation("TransferTo")
+}
+
+/// Factory → Shop dispatch batch. Shop receives only by scanning qrValue.
+model TransferBatch {
+  id             String              @id @default(auto()) @map("_id") @db.ObjectId
+  batchNo        String              @unique
+  qrValue        String              @unique
+  fromSiteId     String              @db.ObjectId
+  toSiteId       String              @db.ObjectId
+  status         TransferBatchStatus @default(PENDING)
+  stockEntryId   String?             @unique @db.ObjectId
+  receiveEntryId String?             @unique @db.ObjectId
+  lineSnapshot   Json
+  remarks        String?
+  createdById    String              @db.ObjectId
+  receivedById   String?             @db.ObjectId
+  createdAt      DateTime            @default(now())
+  receivedAt     DateTime?
+
+  fromSite   Site  @relation("TransferFrom", fields: [fromSiteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  toSite     Site  @relation("TransferTo", fields: [toSiteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy  User  @relation("TransferCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  receivedBy User? @relation("TransferReceivedBy", fields: [receivedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model UserSite {
