@@ -183,6 +183,8 @@ model TransferBatch {
   /// Not unique: MongoDB rejects multiple nulls on unique indexes
   receiveEntryId String?             @db.ObjectId
   lineSnapshot   Json
+  /// What shop actually received (may be less than sent)
+  receivedSnapshot Json?
   remarks        String?
   createdById    String              @db.ObjectId
   receivedById   String?             @db.ObjectId

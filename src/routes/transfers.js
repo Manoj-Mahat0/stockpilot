@@ -43,10 +43,24 @@ router.post(
     const body = z
       .object({
         code: z.string().min(1),
+        // Optional edits: qty/weight per product (0 = not received, never > sent)
+        lines: z
+          .array(
+            z.object({
+              productId: z.string(),
+              quantity: z.number().nonnegative(),
+              weight: z.number().nonnegative().optional(),
+            })
+          )
+          .optional(),
       })
       .parse(req.body);
 
-    const result = await receiveBatch({ user: req.user, code: body.code });
+    const result = await receiveBatch({
+      user: req.user,
+      code: body.code,
+      lines: body.lines,
+    });
     res.status(201).json(result);
   })
 );
