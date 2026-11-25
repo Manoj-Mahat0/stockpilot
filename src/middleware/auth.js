@@ -16,7 +16,10 @@ async function requireAuth(req, _res, next) {
       throw new AppError("Invalid or expired token", 401, "UNAUTHORIZED");
     }
 
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { userSites: { include: { site: true } } },
+    });
     if (!user || user.status !== "ACTIVE") {
       throw new AppError("Account inactive or not found", 401, "UNAUTHORIZED");
     }
@@ -27,6 +30,15 @@ async function requireAuth(req, _res, next) {
       email: user.email,
       name: user.name,
       employeeId: user.employeeId,
+      canDeleteEntry: user.canDeleteEntry,
+      canViewStock: user.canViewStock,
+      canInward: user.canInward,
+      canOutward: user.canOutward,
+      canEditEntry: user.canEditEntry,
+      canPrintDocs: user.canPrintDocs,
+      canViewReports: user.canViewReports,
+      sites: user.userSites.map((us) => us.site),
+      siteIds: user.userSites.map((us) => us.siteId),
     };
     next();
   } catch (err) {
@@ -42,10 +54,30 @@ function requireAdmin(req, _res, next) {
 }
 
 function requireStaffOrAdmin(req, _res, next) {
-  if (!req.user || !["ADMIN", "STAFF"].includes(req.user.role)) {
+  if (!req.user || !["ADMIN", "STAFF", "FACTORY", "SHOP"].includes(req.user.role)) {
     return next(new AppError("Access denied", 403, "FORBIDDEN"));
   }
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, requireStaffOrAdmin };
+function requireAnyAppUser(req, _res, next) {
+  if (!req.user || !["ADMIN", "FACTORY", "SHOP", "STAFF"].includes(req.user.role)) {
+    return next(new AppError("Access denied", 403, "FORBIDDEN"));
+  }
+  next();
+}
+
+function assertSiteAccess(user, siteId) {
+  if (user.role === "ADMIN") return;
+  if (!user.siteIds.includes(siteId)) {
+    throw new AppError("Not assigned to this site", 403, "FORBIDDEN");
+  }
+}
+
+module.exports = {
+  requireAuth,
+  requireAdmin,
+  requireStaffOrAdmin,
+  requireAnyAppUser,
+  assertSiteAccess,
+};

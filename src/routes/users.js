@@ -10,6 +10,16 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+const permFields = z.object({
+  canDeleteEntry: z.boolean().optional(),
+  canViewStock: z.boolean().optional(),
+  canInward: z.boolean().optional(),
+  canOutward: z.boolean().optional(),
+  canEditEntry: z.boolean().optional(),
+  canPrintDocs: z.boolean().optional(),
+  canViewReports: z.boolean().optional(),
+});
+
 router.get(
   "/",
   requireAdmin,
@@ -17,9 +27,15 @@ router.get(
     const role = req.query.role;
     const users = await prisma.user.findMany({
       where: role ? { role } : undefined,
+      include: { userSites: { include: { site: true } } },
       orderBy: { createdAt: "desc" },
     });
-    res.json(users.map(publicUser));
+    res.json(
+      users.map((u) => publicUser(
+        u,
+        u.userSites.map((us) => us.site)
+      ))
+    );
   })
 );
 
@@ -27,12 +43,12 @@ router.get(
   "/:id",
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
-    if (!user) throw new AppError("User not found", 404);
-    const stockOutCount = await prisma.stockOutSession.count({
-      where: { performedById: user.id, status: "COMPLETED" },
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { userSites: { include: { site: true } } },
     });
-    res.json({ ...publicUser(user), stockOutCount });
+    if (!user) throw new AppError("User not found", 404);
+    res.json(publicUser(user, user.userSites.map((us) => us.site)));
   })
 );
 
@@ -47,26 +63,26 @@ router.post(
         email: z.string().email(),
         phone: z.string().optional(),
         password: z.string().min(8),
-        role: z.enum(["ADMIN", "STAFF"]).default("STAFF"),
+        role: z.enum(["ADMIN", "FACTORY", "SHOP"]).default("SHOP"),
         department: z.string().optional(),
-        joiningDate: z.string().optional(),
+        siteIds: z.array(z.string()).default([]),
       })
+      .merge(permFields)
       .parse(req.body);
 
     const passwordHash = await bcrypt.hash(body.password, 12);
+    const { siteIds, password, ...rest } = body;
     const user = await prisma.user.create({
       data: {
-        employeeId: body.employeeId,
-        name: body.name,
-        email: body.email,
-        phone: body.phone,
+        ...rest,
         passwordHash,
-        role: body.role,
-        department: body.department,
-        joiningDate: body.joiningDate ? new Date(body.joiningDate) : null,
+        userSites: siteIds.length
+          ? { create: siteIds.map((siteId) => ({ siteId })) }
+          : undefined,
       },
+      include: { userSites: { include: { site: true } } },
     });
-    res.status(201).json(publicUser(user));
+    res.status(201).json(publicUser(user, user.userSites.map((us) => us.site)));
   })
 );
 
@@ -81,19 +97,27 @@ router.patch(
         phone: z.string().optional().nullable(),
         department: z.string().optional().nullable(),
         status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
-        joiningDate: z.string().optional().nullable(),
+        role: z.enum(["ADMIN", "FACTORY", "SHOP"]).optional(),
+        siteIds: z.array(z.string()).optional(),
       })
+      .merge(permFields)
       .parse(req.body);
 
-    const data = { ...body };
-    if (body.joiningDate) data.joiningDate = new Date(body.joiningDate);
-    if (body.joiningDate === null) data.joiningDate = null;
+    const { siteIds, ...data } = body;
+
+    if (siteIds) {
+      await prisma.userSite.deleteMany({ where: { userId: req.params.id } });
+      for (const siteId of siteIds) {
+        await prisma.userSite.create({ data: { userId: req.params.id, siteId } });
+      }
+    }
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data,
+      include: { userSites: { include: { site: true } } },
     });
-    res.json(publicUser(user));
+    res.json(publicUser(user, user.userSites.map((us) => us.site)));
   })
 );
 
@@ -108,20 +132,6 @@ router.post(
       data: { passwordHash },
     });
     res.json({ ok: true });
-  })
-);
-
-router.get(
-  "/:id/stock-outs",
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const sessions = await prisma.stockOutSession.findMany({
-      where: { performedById: req.params.id, status: "COMPLETED" },
-      include: { items: { include: { product: true, location: true } } },
-      orderBy: { completedAt: "desc" },
-      take: 100,
-    });
-    res.json(sessions);
   })
 );
 

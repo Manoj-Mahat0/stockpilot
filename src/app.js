@@ -16,6 +16,10 @@ const reportRoutes = require("./routes/reports");
 const notificationRoutes = require("./routes/notifications");
 const settingsRoutes = require("./routes/settings");
 const catalogRoutes = require("./routes/catalog");
+const siteRoutes = require("./routes/sites");
+const entryRoutes = require("./routes/entries");
+const siteStockRoutes = require("./routes/siteStock");
+const documentRoutes = require("./routes/documents");
 
 const app = express();
 
@@ -62,6 +66,10 @@ app.use("/api/catalog", catalogRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/stock", stockRoutes);
+app.use("/api/sites", siteRoutes);
+app.use("/api/entries", entryRoutes);
+app.use("/api/site-stock", siteStockRoutes);
+app.use("/api/documents", documentRoutes);
 app.use("/api/barcodes", barcodeRoutes);
 app.use("/api/audits", auditRoutes);
 app.use("/api/dashboard", dashboardRoutes);

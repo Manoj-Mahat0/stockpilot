@@ -48,6 +48,7 @@ router.get(
   "/lookup/:code",
   asyncHandler(async (req, res) => {
     const code = req.params.code;
+    const siteId = req.query.siteId;
     const product = await prisma.product.findFirst({
       where: {
         OR: [{ sku: code }, { barcodes: { some: { value: code } } }],
@@ -58,12 +59,19 @@ router.get(
         unit: true,
         barcodes: true,
         stockBalances: { include: { location: true } },
+        siteStocks: siteId ? { where: { siteId }, include: { site: true } } : { include: { site: true } },
       },
     });
     if (!product) throw new AppError("Product not found for barcode/SKU", 404);
+    const siteStock = siteId
+      ? product.siteStocks.find((s) => s.siteId === siteId) || null
+      : null;
     res.json({
       ...product,
       totalQty: product.stockBalances.reduce((s, b) => s + Number(b.quantity), 0),
+      siteQty: siteStock ? Number(siteStock.quantity) : null,
+      siteWeight: siteStock ? Number(siteStock.weight) : null,
+      siteStock,
     });
   })
 );

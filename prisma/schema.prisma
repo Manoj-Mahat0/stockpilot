@@ -9,7 +9,24 @@ datasource db {
 
 enum Role {
   ADMIN
+  FACTORY
+  SHOP
   STAFF
+}
+
+enum SiteType {
+  FACTORY
+  SHOP
+}
+
+enum EntryTxnType {
+  INWARD
+  OUTWARD
+}
+
+enum DocType {
+  CHALLAN
+  INVOICE
 }
 
 enum UserStatus {
@@ -93,19 +110,29 @@ enum NotificationType {
 }
 
 model User {
-  id           String     @id @default(auto()) @map("_id") @db.ObjectId
-  employeeId   String     @unique
-  name         String
-  email        String     @unique
-  phone        String?
-  passwordHash String
-  role         Role
-  status       UserStatus @default(ACTIVE)
-  joiningDate  DateTime?
-  department   String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id             String     @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId     String     @unique
+  name           String
+  email          String     @unique
+  phone          String?
+  passwordHash   String
+  role           Role
+  status         UserStatus @default(ACTIVE)
+  joiningDate    DateTime?
+  department     String?
+  canDeleteEntry Boolean    @default(false)
+  canViewStock   Boolean    @default(true)
+  canInward      Boolean    @default(true)
+  canOutward     Boolean    @default(true)
+  canEditEntry   Boolean    @default(false)
+  canPrintDocs   Boolean    @default(true)
+  canViewReports Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
+  userSites         UserSite[]
+  stockEntries      StockEntry[]
+  documents         Document[]
   stockInSessions   StockInSession[]
   stockOutSessions  StockOutSession[]
   stockTransactions StockTransaction[]
@@ -115,6 +142,105 @@ model User {
   notifications     Notification[]
   activityLogs      ActivityLog[]
   refreshTokens     RefreshToken[]
+}
+
+model Site {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  code      String   @unique
+  name      String
+  type      SiteType
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userSites          UserSite[]
+  stocks             SiteStock[]
+  entries            StockEntry[]       @relation("EntrySite")
+  incomingTransfers  StockEntry[]       @relation("EntryDestination")
+  documents          Document[]
+}
+
+model UserSite {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  siteId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, siteId])
+}
+
+model SiteStock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  siteId    String   @db.ObjectId
+  productId String   @db.ObjectId
+  quantity  Float    @default(0)
+  weight    Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([siteId, productId])
+}
+
+model StockEntry {
+  id                String       @id @default(auto()) @map("_id") @db.ObjectId
+  entryNo           String       @unique
+  txnType           EntryTxnType
+  siteId            String       @db.ObjectId
+  destinationSiteId String?      @db.ObjectId
+  remarks           String?
+  performedById     String       @db.ObjectId
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  site            Site             @relation("EntrySite", fields: [siteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  destinationSite Site?            @relation("EntryDestination", fields: [destinationSiteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  performedBy     User             @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lines           StockEntryLine[]
+  document        Document?
+}
+
+model StockEntryLine {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  entryId   String   @db.ObjectId
+  productId String   @db.ObjectId
+  barcode   String?
+  quantity  Float
+  weight    Float    @default(0)
+  rate      Float    @default(0)
+  remarks   String?
+  createdAt DateTime @default(now())
+
+  entry   StockEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model Document {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  docNo          String   @unique
+  type           DocType
+  siteId         String   @db.ObjectId
+  stockEntryId   String?  @unique @db.ObjectId
+  customerName   String?
+  customerPhone  String?
+  customerGstin  String?
+  gstRate        Float    @default(0)
+  subtotal       Float    @default(0)
+  gstAmount      Float    @default(0)
+  totalAmount    Float    @default(0)
+  remarks        String?
+  lineSnapshot   Json?
+  createdById    String   @db.ObjectId
+  createdAt      DateTime @default(now())
+
+  site       Site        @relation(fields: [siteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stockEntry StockEntry? @relation(fields: [stockEntryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy  User        @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model RefreshToken {
@@ -186,16 +312,31 @@ model Product {
   stockOutItems     StockOutItem[]
   stockAdjustments  StockAdjustment[]
   stockAuditItems   StockAuditItem[]
+  siteStocks        SiteStock[]
+  stockEntryLines   StockEntryLine[]
+}
+
+model Vendor {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String   @unique
+  phone     String?
+  email     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stockInSessions StockInSession[]
 }
 
 model ProductBarcode {
-  id        String           @id @default(auto()) @map("_id") @db.ObjectId
-  productId String           @db.ObjectId
-  value     String           @unique
-  symbology BarcodeSymbology @default(CODE128)
-  isPrimary Boolean          @default(false)
-  createdAt DateTime         @default(now())
-  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id           String           @id @default(auto()) @map("_id") @db.ObjectId
+  productId    String           @db.ObjectId
+  value        String           @unique
+  symbology    BarcodeSymbology @default(CODE128)
+  isPrimary    Boolean          @default(false)
+  stockInItemId String?
+  createdAt    DateTime         @default(now())
+  product      Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model Warehouse {
@@ -341,6 +482,8 @@ model StockInSession {
   id            String        @id @default(auto()) @map("_id") @db.ObjectId
   grnNo         String        @unique
   reference     String?
+  invoiceNo     String?
+  vendorId      String?       @db.ObjectId
   status        SessionStatus @default(DRAFT)
   remarks       String?
   performedById String        @db.ObjectId
@@ -349,18 +492,22 @@ model StockInSession {
   updatedAt     DateTime      @updatedAt
 
   performedBy User          @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vendor      Vendor?       @relation(fields: [vendorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   items       StockInItem[]
 }
 
 model StockInItem {
-  id         String    @id @default(auto()) @map("_id") @db.ObjectId
-  sessionId  String    @db.ObjectId
-  productId  String    @db.ObjectId
-  locationId String    @db.ObjectId
-  quantity   Float
-  batchNo    String?
-  expiryDate DateTime?
-  createdAt  DateTime  @default(now())
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId       String    @db.ObjectId
+  productId       String    @db.ObjectId
+  locationId      String    @db.ObjectId
+  quantity        Float
+  unitCost        Float     @default(0)
+  batchNo         String?
+  manufactureDate DateTime?
+  expiryDate      DateTime?
+  barcodeValue    String?   @unique
+  createdAt       DateTime  @default(now())
 
   session  StockInSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   product  Product        @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)

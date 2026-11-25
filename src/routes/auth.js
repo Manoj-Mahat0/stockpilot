@@ -23,7 +23,7 @@ router.post(
       .object({
         identifier: z.string().min(1),
         password: z.string().min(1),
-        expectedRole: z.enum(["ADMIN", "STAFF"]).optional(),
+        expectedRole: z.enum(["ADMIN", "FACTORY", "SHOP", "STAFF"]).optional(),
       })
       .parse(req.body);
 

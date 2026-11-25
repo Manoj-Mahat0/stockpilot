@@ -9,17 +9,20 @@ async function main() {
     create: {
       id: "default",
       companyName: "StockPilot",
-      tagline: "Scan. Track. Control. Everything in Stock.",
-      warehouseLabel: "Main Warehouse • HQ-01",
+      tagline: "Factory & Shop Stock Control",
+      warehouseLabel: "Main Factory • HQ-01",
     },
-    update: {},
+    update: {
+      tagline: "Factory & Shop Stock Control",
+    },
   });
 
   const adminHash = await bcrypt.hash("Admin@12345", 12);
-  const staffHash = await bcrypt.hash("Staff@12345", 12);
+  const factoryHash = await bcrypt.hash("Factory@12345", 12);
+  const shopHash = await bcrypt.hash("Shop@12345", 12);
 
   const existingAdmin = await prisma.user.findFirst({
-    where: { OR: [{ employeeId: "ADM-001" }, { email: "admin@stockpilot.local" }, { email: "a@gmail.com" }] },
+    where: { OR: [{ employeeId: "ADM-001" }, { email: "a@gmail.com" }] },
   });
   const admin = existingAdmin
     ? await prisma.user.update({
@@ -28,11 +31,17 @@ async function main() {
           employeeId: "ADM-001",
           name: "Alex Morgan",
           email: "a@gmail.com",
-          phone: "+1-555-0100",
           passwordHash: adminHash,
           role: "ADMIN",
           status: "ACTIVE",
           department: "Operations",
+          canDeleteEntry: true,
+          canViewStock: true,
+          canInward: true,
+          canOutward: true,
+          canEditEntry: true,
+          canPrintDocs: true,
+          canViewReports: true,
         },
       })
     : await prisma.user.create({
@@ -40,40 +49,110 @@ async function main() {
           employeeId: "ADM-001",
           name: "Alex Morgan",
           email: "a@gmail.com",
-          phone: "+1-555-0100",
           passwordHash: adminHash,
           role: "ADMIN",
           department: "Operations",
-          joiningDate: new Date("2024-01-01"),
+          canDeleteEntry: true,
+          canEditEntry: true,
         },
       });
 
-  const staff = await prisma.user.upsert({
-    where: { email: "staff@stockpilot.local" },
+  const factoryUser = await prisma.user.upsert({
+    where: { email: "factory@stockpilot.local" },
     create: {
-      employeeId: "EMP-104",
-      name: "Marcus Chen",
-      email: "staff@stockpilot.local",
-      phone: "+1-555-0104",
-      passwordHash: staffHash,
-      role: "STAFF",
-      department: "Warehouse Floor",
-      joiningDate: new Date("2024-06-01"),
+      employeeId: "FAC-001",
+      name: "Ravi Factory",
+      email: "factory@stockpilot.local",
+      passwordHash: factoryHash,
+      role: "FACTORY",
+      department: "Production",
+      canDeleteEntry: false,
+      canViewStock: true,
+      canInward: true,
+      canOutward: true,
+      canPrintDocs: true,
     },
-    update: { passwordHash: staffHash, status: "ACTIVE" },
+    update: {
+      passwordHash: factoryHash,
+      role: "FACTORY",
+      status: "ACTIVE",
+      canInward: true,
+      canOutward: true,
+      canViewStock: true,
+    },
   });
 
-  const warehouse = await prisma.warehouse.upsert({
-    where: { code: "MAIN-WH" },
-    create: { code: "MAIN-WH", name: "Main Warehouse", isActive: true },
+  const shopUser = await prisma.user.upsert({
+    where: { email: "shop@stockpilot.local" },
+    create: {
+      employeeId: "SHP-001",
+      name: "Neha Shop",
+      email: "shop@stockpilot.local",
+      passwordHash: shopHash,
+      role: "SHOP",
+      department: "Retail",
+      canDeleteEntry: false,
+      canViewStock: true,
+      canInward: true,
+      canOutward: true,
+      canEditEntry: false,
+      canPrintDocs: true,
+      canViewReports: true,
+    },
+    update: {
+      passwordHash: shopHash,
+      role: "SHOP",
+      status: "ACTIVE",
+      canViewStock: true,
+      canInward: true,
+      canOutward: true,
+      canPrintDocs: true,
+      canViewReports: true,
+    },
+  });
+
+  const factory = await prisma.site.upsert({
+    where: { code: "FAC-HQ" },
+    create: {
+      code: "FAC-HQ",
+      name: "Main Factory",
+      type: "FACTORY",
+      address: "Industrial Area, HQ",
+    },
+    update: { isActive: true, name: "Main Factory" },
+  });
+
+  const shop1 = await prisma.site.upsert({
+    where: { code: "SHP-01" },
+    create: {
+      code: "SHP-01",
+      name: "City Shop 01",
+      type: "SHOP",
+      address: "Market Road",
+    },
     update: { isActive: true },
   });
 
-  // Deactivate any other warehouses (single warehouse rule)
-  await prisma.warehouse.updateMany({
-    where: { NOT: { id: warehouse.id } },
-    data: { isActive: false },
+  const shop2 = await prisma.site.upsert({
+    where: { code: "SHP-02" },
+    create: {
+      code: "SHP-02",
+      name: "Mall Shop 02",
+      type: "SHOP",
+      address: "City Mall",
+    },
+    update: { isActive: true },
   });
+
+  for (const [userId, siteId] of [
+    [factoryUser.id, factory.id],
+    [shopUser.id, shop1.id],
+  ]) {
+    const existing = await prisma.userSite.findFirst({ where: { userId, siteId } });
+    if (!existing) {
+      await prisma.userSite.create({ data: { userId, siteId } });
+    }
+  }
 
   const unit = await prisma.unit.upsert({
     where: { symbol: "PCS" },
@@ -81,168 +160,59 @@ async function main() {
     update: {},
   });
 
-  const electronics = await prisma.category.upsert({
-    where: { name: "Electronics" },
-    create: { name: "Electronics" },
-    update: {},
-  });
-  const packaging = await prisma.category.upsert({
-    where: { name: "Packaging" },
-    create: { name: "Packaging" },
+  const category = await prisma.category.upsert({
+    where: { name: "General" },
+    create: { name: "General" },
     update: {},
   });
 
-  const brand = await prisma.brand.upsert({
-    where: { name: "StockPilot Gear" },
-    create: { name: "StockPilot Gear" },
-    update: {},
-  });
-
-  const locationDefs = [
-    { roomCode: "RM-A", rowCode: "RW-02", rackCode: "RK-05", shelfCode: "SH-03", binCode: "BIN-01" },
-    { roomCode: "RM-A", rowCode: "RW-01", rackCode: "RK-01", shelfCode: "SH-04" },
-    { roomCode: "RM-B", rowCode: "RW-01", rackCode: "RK-02", shelfCode: "SH-01" },
-    { roomCode: "RM-C", rowCode: "RW-04", rackCode: "RK-08", shelfCode: "SH-02" },
+  const productsData = [
+    { sku: "SCN-X2", name: "Barcode Scanner Pro X2", barcode: "SP-SCN-X2-001", qty: 100, weight: 50, price: 120 },
+    { sku: "LBL-4X6", name: "Thermal Label Roll 4x6", barcode: "SP-LBL-4X6-001", qty: 200, weight: 80, price: 18 },
+    { sku: "HEX-M8", name: "M8 Steel Hex Bolts (Box)", barcode: "SP-HEX-M8-001", qty: 80, weight: 40, price: 8 },
   ];
 
-  const locations = [];
-  for (const def of locationDefs) {
-    const code = [def.roomCode, def.rowCode, def.rackCode, def.shelfCode, def.binCode]
-      .filter(Boolean)
-      .join("-");
-    const barcode = `LOC-${code}`;
-
-    let room = await prisma.room.findFirst({
-      where: { warehouseId: warehouse.id, code: def.roomCode },
-    });
-    if (!room) {
-      room = await prisma.room.create({
-        data: { warehouseId: warehouse.id, code: def.roomCode, name: def.roomCode },
+  for (const p of productsData) {
+    let product = await prisma.product.findUnique({ where: { sku: p.sku } });
+    if (!product) {
+      product = await prisma.product.create({
+        data: {
+          sku: p.sku,
+          name: p.name,
+          categoryId: category.id,
+          unitId: unit.id,
+          purchasePrice: p.price,
+          sellingPrice: p.price * 1.4,
+          barcodes: {
+            create: { value: p.barcode, symbology: "CODE128", isPrimary: true },
+          },
+        },
       });
-    }
-    let row = await prisma.row.findFirst({ where: { roomId: room.id, code: def.rowCode } });
-    if (!row) {
-      row = await prisma.row.create({
-        data: { roomId: room.id, code: def.rowCode, name: def.rowCode },
-      });
-    }
-    let rack = await prisma.rack.findFirst({ where: { rowId: row.id, code: def.rackCode } });
-    if (!rack) {
-      rack = await prisma.rack.create({
-        data: { rowId: row.id, code: def.rackCode, name: def.rackCode },
-      });
-    }
-    let shelf = await prisma.shelf.findFirst({ where: { rackId: rack.id, code: def.shelfCode } });
-    if (!shelf) {
-      shelf = await prisma.shelf.create({
-        data: { rackId: rack.id, code: def.shelfCode, name: def.shelfCode },
-      });
-    }
-    if (def.binCode) {
-      const bin = await prisma.bin.findFirst({ where: { shelfId: shelf.id, code: def.binCode } });
-      if (!bin) {
-        await prisma.bin.create({
-          data: { shelfId: shelf.id, code: def.binCode, name: def.binCode },
+    } else {
+      const bc = await prisma.productBarcode.findFirst({ where: { value: p.barcode } });
+      if (!bc) {
+        await prisma.productBarcode.create({
+          data: { productId: product.id, value: p.barcode, symbology: "CODE128", isPrimary: true },
         });
       }
     }
 
-    const loc = await prisma.location.upsert({
-      where: { code },
+    await prisma.siteStock.upsert({
+      where: { siteId_productId: { siteId: factory.id, productId: product.id } },
       create: {
-        warehouseId: warehouse.id,
-        code,
-        barcode,
-        roomCode: def.roomCode,
-        rowCode: def.rowCode,
-        rackCode: def.rackCode,
-        shelfCode: def.shelfCode,
-        binCode: def.binCode || null,
-        status: "ACTIVE",
-      },
-      update: {},
-    });
-    locations.push(loc);
-  }
-
-  const productsData = [
-    {
-      sku: "SCN-X2",
-      name: "Barcode Scanner Pro X2",
-      categoryId: electronics.id,
-      purchasePrice: 120,
-      sellingPrice: 189,
-      minStock: 10,
-      reorderLevel: 25,
-      barcode: "SP-SCN-X2-001",
-      qty: 120,
-      location: locations[0],
-    },
-    {
-      sku: "LBL-4X6",
-      name: "Thermal Label Roll 4x6",
-      categoryId: packaging.id,
-      purchasePrice: 18,
-      sellingPrice: 29,
-      minStock: 20,
-      reorderLevel: 40,
-      barcode: "SP-LBL-4X6-001",
-      qty: 368,
-      location: locations[1],
-    },
-    {
-      sku: "HEX-M8",
-      name: "M8 Steel Hex Bolts (Box)",
-      categoryId: packaging.id,
-      purchasePrice: 8,
-      sellingPrice: 14,
-      minStock: 15,
-      reorderLevel: 30,
-      barcode: "SP-HEX-M8-001",
-      qty: 6,
-      location: locations[2],
-    },
-  ];
-
-  for (const p of productsData) {
-    const product = await prisma.product.upsert({
-      where: { sku: p.sku },
-      create: {
-        sku: p.sku,
-        name: p.name,
-        categoryId: p.categoryId,
-        brandId: brand.id,
-        unitId: unit.id,
-        purchasePrice: p.purchasePrice,
-        sellingPrice: p.sellingPrice,
-        minStock: p.minStock,
-        reorderLevel: p.reorderLevel,
-        barcodes: {
-          create: { value: p.barcode, symbology: "CODE128", isPrimary: true },
-        },
-      },
-      update: {},
-    });
-
-    await prisma.stockBalance.upsert({
-      where: {
-        productId_locationId_batchNo: {
-          productId: product.id,
-          locationId: p.location.id,
-          batchNo: "",
-        },
-      },
-      create: {
+        siteId: factory.id,
         productId: product.id,
-        locationId: p.location.id,
-        batchNo: "",
         quantity: p.qty,
+        weight: p.weight,
       },
-      update: { quantity: p.qty },
+      update: { quantity: p.qty, weight: p.weight },
     });
   }
 
   for (const key of [
+    ["ENT", "ENT"],
+    ["CHL", "CHL"],
+    ["INV", "INV"],
     ["GRN", "GRN"],
     ["ISS", "ISS"],
     ["TX", "TX"],
@@ -256,10 +226,11 @@ async function main() {
     });
   }
 
-  console.log("Seed complete");
-  console.log("Admin:", admin.email, "/ Admin@12345");
-  // a@gmail.com / Admin@12345
-  console.log("Staff:", staff.email, "/ Staff@12345");
+  console.log("Seed complete (Factory/Shop)");
+  console.log("Admin:   a@gmail.com / Admin@12345");
+  console.log("Factory: factory@stockpilot.local / Factory@12345");
+  console.log("Shop:    shop@stockpilot.local / Shop@12345");
+  console.log("Admin id:", admin.id, "Sites:", factory.code, shop1.code, shop2.code);
 }
 
 main()

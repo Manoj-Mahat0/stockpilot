@@ -5,7 +5,7 @@ const { prisma } = require("../config/prisma");
 const { env } = require("../config/env");
 const { AppError } = require("../utils/errors");
 
-function publicUser(user) {
+function publicUser(user, sites = []) {
   return {
     id: user.id,
     employeeId: user.employeeId,
@@ -16,6 +16,14 @@ function publicUser(user) {
     status: user.status,
     department: user.department,
     joiningDate: user.joiningDate,
+    canDeleteEntry: !!user.canDeleteEntry,
+    canViewStock: user.canViewStock !== false,
+    canInward: user.canInward !== false,
+    canOutward: user.canOutward !== false,
+    canEditEntry: !!user.canEditEntry,
+    canPrintDocs: user.canPrintDocs !== false,
+    canViewReports: user.canViewReports !== false,
+    sites,
   };
 }
 
@@ -36,6 +44,14 @@ async function createRefreshToken(userId) {
   return token;
 }
 
+async function loadUserSites(userId) {
+  const rows = await prisma.userSite.findMany({
+    where: { userId },
+    include: { site: true },
+  });
+  return rows.map((r) => r.site);
+}
+
 async function login({ identifier, password, expectedRole }) {
   const user = await prisma.user.findFirst({
     where: {
@@ -47,7 +63,7 @@ async function login({ identifier, password, expectedRole }) {
   if (user.status !== "ACTIVE") throw new AppError("Account is inactive", 403, "INACTIVE");
 
   if (expectedRole && user.role !== expectedRole) {
-    throw new AppError(`Please sign in as ${user.role === "ADMIN" ? "Admin" : "Staff"}`, 403, "ROLE_MISMATCH");
+    throw new AppError("Role mismatch for this account", 403, "ROLE_MISMATCH");
   }
 
   const ok = await bcrypt.compare(password, user.passwordHash);
@@ -55,6 +71,7 @@ async function login({ identifier, password, expectedRole }) {
 
   const accessToken = signAccessToken(user);
   const refreshToken = await createRefreshToken(user.id);
+  const sites = await loadUserSites(user.id);
 
   await prisma.activityLog.create({
     data: {
@@ -66,7 +83,7 @@ async function login({ identifier, password, expectedRole }) {
   });
 
   return {
-    user: publicUser(user),
+    user: publicUser(user, sites),
     accessToken,
     refreshToken,
   };
@@ -75,7 +92,8 @@ async function login({ identifier, password, expectedRole }) {
 async function me(userId) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError("User not found", 404);
-  return publicUser(user);
+  const sites = await loadUserSites(userId);
+  return publicUser(user, sites);
 }
 
 async function changePassword(userId, currentPassword, newPassword) {
@@ -97,9 +115,10 @@ async function refresh(refreshToken) {
     throw new AppError("Invalid refresh token", 401);
   }
   if (row.user.status !== "ACTIVE") throw new AppError("Account inactive", 403);
+  const sites = await loadUserSites(row.user.id);
   return {
     accessToken: signAccessToken(row.user),
-    user: publicUser(row.user),
+    user: publicUser(row.user, sites),
   };
 }
 
@@ -118,4 +137,5 @@ module.exports = {
   logout,
   publicUser,
   signAccessToken,
+  loadUserSites,
 };
