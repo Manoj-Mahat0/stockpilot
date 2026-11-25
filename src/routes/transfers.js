@@ -51,33 +51,36 @@ router.post(
   })
 );
 
-router.get(
-  "/:id/qr.pdf",
-  asyncHandler(async (req, res) => {
-    const batch = await findBatchByCode(req.params.id);
-    // also allow lookup by Mongo id
-    let found = batch;
-    if (!found) {
-      const { prisma } = require("../config/prisma");
+async function sendBatchQrPdf(req, res) {
+  const id = req.params.id;
+  let found = await findBatchByCode(id);
+  if (!found) {
+    const { prisma } = require("../config/prisma");
+    try {
       found = await prisma.transferBatch.findUnique({
-        where: { id: req.params.id },
+        where: { id },
         include: { fromSite: true, toSite: true },
       });
+    } catch (_) {
+      found = null;
     }
-    if (!found) throw new AppError("Transfer batch not found", 404);
+  }
+  if (!found) throw new AppError("Transfer batch not found", 404);
 
-    if (req.user.role === "SHOP" && !req.user.siteIds.includes(found.toSiteId)) {
-      throw new AppError("Forbidden", 403);
-    }
-    if (req.user.role === "FACTORY" && !req.user.siteIds.includes(found.fromSiteId)) {
-      throw new AppError("Forbidden", 403);
-    }
+  if (req.user.role === "SHOP" && !req.user.siteIds.includes(found.toSiteId)) {
+    throw new AppError("Forbidden", 403);
+  }
+  if (req.user.role === "FACTORY" && !req.user.siteIds.includes(found.fromSiteId)) {
+    throw new AppError("Forbidden", 403);
+  }
 
-    const pdf = await buildBatchQrPdf(found);
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${found.batchNo}-qr.pdf"`);
-    res.send(pdf);
-  })
-);
+  const pdf = await buildBatchQrPdf(found);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${found.batchNo}-qr.pdf"`);
+  res.send(pdf);
+}
+
+router.get("/:id/qr.pdf", asyncHandler(sendBatchQrPdf));
+router.get("/:id/qr", asyncHandler(sendBatchQrPdf));
 
 module.exports = router;

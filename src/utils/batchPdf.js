@@ -1,8 +1,19 @@
 /**
  * Transfer batch QR PDF — scannable QR + product list for shop receive.
+ * Helvetica/WinAnsi only — strip unsupported unicode.
  */
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const QRCode = require("qrcode");
+
+function ascii(text) {
+  return String(text ?? "")
+    .replace(/[→←↔⇒⇐]/g, "->")
+    .replace(/[—–−]/g, "-")
+    .replace(/[·•]/g, "|")
+    .replace(/[“”„]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[^\x20-\x7E]/g, "?");
+}
 
 async function buildBatchQrPdf(batch) {
   const pdfDoc = await PDFDocument.create();
@@ -15,17 +26,12 @@ async function buildBatchQrPdf(batch) {
   let page = pdfDoc.addPage([pageW, pageH]);
   let y = pageH - margin;
 
-  const drawText = (text, opts) => {
-    page.drawText(String(text || ""), {
-      x: margin,
-      size: 11,
-      font,
-      color: rgb(0, 0, 0),
-      ...opts,
-    });
+  const drawText = (text, opts = {}) => {
+    const { y: ty, size = 11, font: f = font, color = rgb(0, 0, 0), x = margin } = opts;
+    page.drawText(ascii(text), { x, y: ty, size, font: f, color, maxWidth: pageW - margin * 2 });
   };
 
-  drawText("STOCKPILOT — Transfer Batch QR", {
+  drawText("STOCKPILOT - Transfer Batch QR", {
     y: y - 16,
     size: 16,
     font: fontBold,
@@ -75,7 +81,7 @@ async function buildBatchQrPdf(batch) {
     }
     const l = lines[i];
     drawText(
-      `${i + 1}. ${l.name || "Product"}  ·  SKU ${l.sku || "—"}  ·  Qty ${l.quantity}  ·  Wt ${l.weight ?? 0}`,
+      `${i + 1}. ${l.name || "Product"}  |  SKU ${l.sku || "-"}  |  Qty ${l.quantity}  |  Wt ${l.weight ?? 0}`,
       { y: y - 11, size: 9 }
     );
     y -= 16;
@@ -86,7 +92,7 @@ async function buildBatchQrPdf(batch) {
   }
 
   y -= 12;
-  drawText("Shop: open Scan → point at this batch QR → Confirm receive.", {
+  drawText("Shop: open Scan -> point at this batch QR -> Confirm receive.", {
     y: y - 11,
     size: 9,
     color: rgb(0.2, 0.2, 0.2),
