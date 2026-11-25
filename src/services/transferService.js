@@ -3,6 +3,8 @@ const { AppError } = require("../utils/errors");
 const { allocateDocumentNo } = require("../utils/sequences");
 const { applyDelta } = require("./entryService");
 
+const ISSUE_TYPES = new Set(["OK", "DAMAGED", "MISSING", "WRONG", "PARTIAL"]);
+
 function normalizeBatchCode(code) {
   return String(code || "")
     .trim()
@@ -53,8 +55,11 @@ async function listBatches({ user, status, siteId }) {
 }
 
 /**
- * Build receive lines: shop can edit qty down (0 = not received), never above sent.
- * Missing qty returns to factory stock.
+ * Per line:
+ * - goodQty → shop stock
+ * - damagedQty → written off (not shop / not factory sellable), recorded
+ * - missing = sent - good - damaged → return to factory
+ * - WRONG: typically good=0, missing=sent, notes = what actually arrived
  */
 function resolveReceiveLines(sentLines, edits) {
   const byProduct = new Map();
@@ -63,82 +68,118 @@ function resolveReceiveLines(sentLines, edits) {
   }
 
   const received = [];
-  const shortfall = [];
+  const shortfall = []; // return to factory
+  const damaged = [];
 
   for (const sent of sentLines) {
     const productId = String(sent.productId);
     const sentQty = Number(sent.quantity);
     const sentWt = Number(sent.weight || 0);
-    const edit = byProduct.get(productId);
+    const edit = byProduct.get(productId) || {};
 
-    let recvQty = sentQty;
-    let recvWt = sentWt;
-    if (edit) {
-      if (edit.quantity != null) recvQty = Number(edit.quantity);
-      if (edit.weight != null) recvWt = Number(edit.weight);
+    let issueType = String(edit.issueType || "OK").toUpperCase();
+    if (!ISSUE_TYPES.has(issueType)) issueType = "OK";
+
+    let goodQty = edit.quantity != null ? Number(edit.quantity) : sentQty;
+    let damagedQty = edit.damagedQuantity != null ? Number(edit.damagedQuantity) : 0;
+    const notes = edit.notes ? String(edit.notes).trim() : "";
+
+    if (issueType === "MISSING") {
+      goodQty = 0;
+      damagedQty = 0;
+    } else if (issueType === "WRONG") {
+      // Expected product not usable; return full to factory unless shop set partial good
+      if (edit.quantity == null) goodQty = 0;
+      if (edit.damagedQuantity == null) damagedQty = 0;
+    } else if (issueType === "DAMAGED" && edit.quantity == null && edit.damagedQuantity == null) {
+      goodQty = 0;
+      damagedQty = sentQty;
     }
 
-    if (Number.isNaN(recvQty) || recvQty < 0) {
-      throw new AppError(`Invalid qty for ${sent.name || productId}`, 400);
+    if (Number.isNaN(goodQty) || goodQty < 0) {
+      throw new AppError(`Invalid received qty for ${sent.name || productId}`, 400);
     }
-    if (recvQty > sentQty + 0.0001) {
+    if (Number.isNaN(damagedQty) || damagedQty < 0) {
+      throw new AppError(`Invalid damaged qty for ${sent.name || productId}`, 400);
+    }
+    if (goodQty + damagedQty > sentQty + 0.0001) {
       throw new AppError(
-        `Cannot receive more than sent for ${sent.name || productId} (sent ${sentQty})`,
+        `${sent.name || productId}: good + damaged cannot exceed sent (${sentQty})`,
         400,
         "QTY_EXCEEDS_SENT"
       );
     }
 
-    // Scale weight if only qty edited
-    if (edit && edit.quantity != null && edit.weight == null && sentQty > 0) {
-      recvWt = (sentWt * recvQty) / sentQty;
-    }
-    if (recvWt < 0) recvWt = 0;
-    if (recvWt > sentWt + 0.0001) recvWt = sentWt;
+    const missQty = Math.max(0, sentQty - goodQty - damagedQty);
+    const unitWt = sentQty > 0 ? sentWt / sentQty : 0;
+    const goodWt = unitWt * goodQty;
+    const damagedWt = unitWt * damagedQty;
+    const missWt = unitWt * missQty;
 
-    const missQty = sentQty - recvQty;
-    const missWt = sentWt - recvWt;
+    if (issueType === "OK" && (goodQty < sentQty || damagedQty > 0 || missQty > 0)) {
+      issueType = damagedQty > 0 ? "DAMAGED" : missQty >= sentQty ? "MISSING" : "PARTIAL";
+    }
 
     received.push({
       productId,
       sku: sent.sku,
       name: sent.name,
       barcode: sent.barcode || null,
-      quantity: recvQty,
-      weight: recvWt,
+      quantity: goodQty,
+      weight: goodWt,
+      damagedQuantity: damagedQty,
+      damagedWeight: damagedWt,
+      missingQuantity: missQty,
       sentQuantity: sentQty,
       sentWeight: sentWt,
+      issueType,
+      notes: notes || null,
     });
 
-    if (missQty > 0.0001 || missWt > 0.0001) {
+    if (missQty > 0.0001) {
       shortfall.push({
         productId,
         sku: sent.sku,
         name: sent.name,
         quantity: missQty,
-        weight: Math.max(0, missWt),
+        weight: missWt,
+        reason: issueType === "WRONG" ? "WRONG_ITEM" : "MISSING",
+      });
+    }
+
+    if (damagedQty > 0.0001) {
+      damaged.push({
+        productId,
+        sku: sent.sku,
+        name: sent.name,
+        quantity: damagedQty,
+        weight: damagedWt,
+        notes: notes || null,
       });
     }
   }
 
-  // Reject unknown productIds in edits
   for (const [pid] of byProduct) {
     if (!sentLines.some((s) => String(s.productId) === pid)) {
       throw new AppError(`Product ${pid} is not in this batch`, 400);
     }
   }
 
-  const totalRecv = received.reduce((s, l) => s + l.quantity, 0);
-  if (totalRecv <= 0) {
-    throw new AppError("Receive at least one product (qty > 0)", 400);
+  // Allow all-missing only if at least one line has WRONG/DAMAGED/MISSING recorded
+  // Require either some good stock OR explicit exception (damaged/wrong/missing all ok for closing batch)
+  const totalGood = received.reduce((s, l) => s + l.quantity, 0);
+  const hasException = received.some((l) => l.issueType !== "OK" || l.damagedQuantity > 0 || l.missingQuantity > 0);
+  if (totalGood <= 0 && !hasException) {
+    throw new AppError("Receive at least one product or mark issues (damaged / missing / wrong)", 400);
+  }
+  // If everything missing with no notes on wrong - still allow closing batch (all returned)
+  if (totalGood <= 0 && received.every((l) => l.missingQuantity >= l.sentQuantity)) {
+    // ok — full return to factory
   }
 
-  return { received, shortfall };
+  return { received, shortfall, damaged };
 }
 
-/**
- * Shop receives PENDING batch. Optional edits: qty/weight <= sent; shortfall → factory.
- */
 async function receiveBatch({ user, code, lines: edits }) {
   const batch = await findBatchByCode(code);
   if (!batch) throw new AppError("Transfer batch not found", 404, "BATCH_NOT_FOUND");
@@ -159,7 +200,7 @@ async function receiveBatch({ user, code, lines: edits }) {
   const sentLines = Array.isArray(batch.lineSnapshot) ? batch.lineSnapshot : [];
   if (!sentLines.length) throw new AppError("Batch has no products", 400);
 
-  const { received, shortfall } = resolveReceiveLines(sentLines, edits);
+  const { received, shortfall, damaged } = resolveReceiveLines(sentLines, edits);
   const inwardLines = received.filter((l) => l.quantity > 0);
 
   return prisma.$transaction(
@@ -169,6 +210,11 @@ async function receiveBatch({ user, code, lines: edits }) {
         throw new AppError("Batch is no longer pending", 400, "BATCH_NOT_PENDING");
       }
 
+      const bits = [];
+      if (damaged.length) bits.push(`${damaged.length} damaged`);
+      if (shortfall.length) bits.push(`${shortfall.length} returned to factory`);
+      const remarkExtra = bits.length ? ` (${bits.join(", ")})` : "";
+
       const entryNo = await allocateDocumentNo("ENT", "ENT", tx);
       const entry = await tx.stockEntry.create({
         data: {
@@ -177,21 +223,26 @@ async function receiveBatch({ user, code, lines: edits }) {
           siteId: batch.toSiteId,
           destinationSiteId: null,
           remarks:
-            shortfall.length > 0
-              ? `Received transfer ${batch.batchNo} (partial — shortfall returned to factory)`
-              : `Received transfer ${batch.batchNo}`,
+            inwardLines.length > 0
+              ? `Received transfer ${batch.batchNo}${remarkExtra}`
+              : `Closed transfer ${batch.batchNo} with exceptions${remarkExtra}`,
           performedById: user.id,
           lines: {
-            create: inwardLines.map((l) => ({
+            create: received.map((l) => ({
               productId: l.productId,
               barcode: l.barcode || null,
               quantity: Number(l.quantity),
               weight: Number(l.weight || 0),
               rate: 0,
               remarks:
-                l.quantity < l.sentQuantity
-                  ? `Sent ${l.sentQuantity}, received ${l.quantity}`
-                  : null,
+                [
+                  l.issueType !== "OK" ? l.issueType : null,
+                  l.damagedQuantity > 0 ? `damaged ${l.damagedQuantity}` : null,
+                  l.missingQuantity > 0 ? `missing ${l.missingQuantity}` : null,
+                  l.notes,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || null,
             })),
           },
         },
@@ -211,7 +262,6 @@ async function receiveBatch({ user, code, lines: edits }) {
         });
       }
 
-      // Not received / short qty → return to factory
       for (const miss of shortfall) {
         await applyDelta(tx, {
           siteId: batch.fromSiteId,
@@ -221,6 +271,8 @@ async function receiveBatch({ user, code, lines: edits }) {
         });
       }
 
+      // Damaged: not returned as sellable — already deducted from factory on send, not added to shop
+
       const updated = await tx.transferBatch.update({
         where: { id: batch.id },
         data: {
@@ -228,7 +280,7 @@ async function receiveBatch({ user, code, lines: edits }) {
           receiveEntryId: entry.id,
           receivedById: user.id,
           receivedAt: new Date(),
-          receivedSnapshot: received,
+          receivedSnapshot: { lines: received, damaged, shortfall },
         },
         include: {
           fromSite: true,
@@ -238,7 +290,7 @@ async function receiveBatch({ user, code, lines: edits }) {
         },
       });
 
-      return { batch: updated, entry, shortfall };
+      return { batch: updated, entry, shortfall, damaged };
     },
     {
       maxWait: 15000,

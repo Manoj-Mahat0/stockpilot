@@ -49,7 +49,10 @@ router.post(
             z.object({
               productId: z.string(),
               quantity: z.number().nonnegative(),
+              damagedQuantity: z.number().nonnegative().optional(),
               weight: z.number().nonnegative().optional(),
+              issueType: z.enum(["OK", "DAMAGED", "MISSING", "WRONG", "PARTIAL"]).optional(),
+              notes: z.string().max(500).optional(),
             })
           )
           .optional(),
