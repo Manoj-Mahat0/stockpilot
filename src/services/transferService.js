@@ -76,7 +76,8 @@ async function receiveBatch({ user, code }) {
   const lines = Array.isArray(batch.lineSnapshot) ? batch.lineSnapshot : [];
   if (!lines.length) throw new AppError("Batch has no products", 400);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(
+    async (tx) => {
     const fresh = await tx.transferBatch.findUnique({ where: { id: batch.id } });
     if (!fresh || fresh.status !== "PENDING") {
       throw new AppError("Batch is no longer pending", 400, "BATCH_NOT_PENDING");
@@ -135,7 +136,12 @@ async function receiveBatch({ user, code }) {
     });
 
     return { batch: updated, entry };
-  });
+  },
+    {
+      maxWait: 15000,
+      timeout: 30000,
+    }
+  );
 }
 
 module.exports = { findBatchByCode, listBatches, receiveBatch };

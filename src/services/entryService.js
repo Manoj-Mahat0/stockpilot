@@ -87,7 +87,9 @@ async function createEntry({
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  // Vercel ↔ Atlas latency needs a longer interactive txn window than default 5s
+  return prisma.$transaction(
+    async (tx) => {
     const entryNo = await allocateDocumentNo("ENT", "ENT", tx);
 
     const entry = await tx.stockEntry.create({
@@ -227,7 +229,12 @@ async function createEntry({
     }
 
     return { entry, document, batch };
-  });
+  },
+    {
+      maxWait: 15000,
+      timeout: 30000,
+    }
+  );
 }
 
 module.exports = { createEntry, applyDelta, getOrCreateSiteStock };
