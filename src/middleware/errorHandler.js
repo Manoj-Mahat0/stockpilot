@@ -23,7 +23,12 @@ function errorHandler(err, _req, res, _next) {
   }
 
   console.error(err);
-  return res.status(500).json({ error: "Internal server error", code: "INTERNAL" });
+  return res.status(500).json({
+    error: err?.message || "Internal server error",
+    code: "INTERNAL",
+    name: err?.name,
+    meta: err?.meta,
+  });
 }
 
 module.exports = { errorHandler };
