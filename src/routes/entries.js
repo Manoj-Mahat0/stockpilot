@@ -65,22 +65,22 @@ router.post(
       .object({
         txnType: z.enum(["INWARD", "OUTWARD"]),
         siteId: z.string(),
-        destinationSiteId: z.string().optional(),
-        remarks: z.string().optional(),
-        docType: z.enum(["CHALLAN", "INVOICE"]).optional(),
-        customerName: z.string().optional(),
-        customerPhone: z.string().optional(),
-        customerGstin: z.string().optional(),
-        gstRate: z.number().nonnegative().optional(),
+        destinationSiteId: z.string().nullish(),
+        remarks: z.string().nullish(),
+        docType: z.enum(["CHALLAN", "INVOICE"]).nullish(),
+        customerName: z.string().nullish(),
+        customerPhone: z.string().nullish(),
+        customerGstin: z.string().nullish(),
+        gstRate: z.number().nonnegative().nullish(),
         lines: z
           .array(
             z.object({
               productId: z.string(),
-              barcode: z.string().optional(),
+              barcode: z.string().nullish(),
               quantity: z.number().positive(),
-              weight: z.number().nonnegative().optional(),
-              rate: z.number().nonnegative().optional(),
-              remarks: z.string().optional(),
+              weight: z.number().nonnegative().nullish(),
+              rate: z.number().nonnegative().nullish(),
+              remarks: z.string().nullish(),
             })
           )
           .min(1),
