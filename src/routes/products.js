@@ -3,6 +3,7 @@ const { z } = require("zod");
 const { prisma } = require("../config/prisma");
 const { requireAuth, requireAdmin, requireStaffOrAdmin } = require("../middleware/auth");
 const { asyncHandler, AppError } = require("../utils/errors");
+const { generateProductBarcode } = require("../utils/barcode");
 
 const router = express.Router();
 router.use(requireAuth, requireStaffOrAdmin);
@@ -122,6 +123,15 @@ router.post(
       })
       .parse(req.body);
 
+    // Every product always gets a barcode (auto-generated if not provided)
+    let barcodeValue = (body.barcode || "").trim() || generateProductBarcode(body.sku);
+    // Ensure uniqueness
+    for (let i = 0; i < 5; i++) {
+      const exists = await prisma.productBarcode.findUnique({ where: { value: barcodeValue } });
+      if (!exists) break;
+      barcodeValue = generateProductBarcode(`${body.sku}${i + 1}`);
+    }
+
     const product = await prisma.product.create({
       data: {
         sku: body.sku,
@@ -138,15 +148,13 @@ router.post(
         trackBatch: body.trackBatch,
         trackExpiry: body.trackExpiry,
         trackSerial: body.trackSerial,
-        barcodes: body.barcode
-          ? {
-              create: {
-                value: body.barcode,
-                symbology: body.symbology,
-                isPrimary: true,
-              },
-            }
-          : undefined,
+        barcodes: {
+          create: {
+            value: barcodeValue,
+            symbology: body.symbology || "CODE128",
+            isPrimary: true,
+          },
+        },
       },
       include: { barcodes: true, category: true, brand: true, unit: true },
     });
