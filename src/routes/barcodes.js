@@ -38,7 +38,7 @@ router.post(
       .object({
         productId: z.string(),
         value: z.string().min(1),
-        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("CODE128"),
+        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("QR"),
         isPrimary: z.boolean().default(false),
       })
       .parse(req.body);
@@ -62,7 +62,7 @@ router.post(
     const body = z
       .object({
         productId: z.string(),
-        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("CODE128"),
+        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("QR"),
       })
       .parse(req.body);
 

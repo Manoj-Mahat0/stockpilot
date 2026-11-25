@@ -119,7 +119,7 @@ router.post(
         trackExpiry: z.boolean().default(false),
         trackSerial: z.boolean().default(false),
         barcode: z.string().optional(),
-        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("CODE128"),
+        symbology: z.enum(["CODE128", "EAN13", "UPCA", "QR"]).default("QR"),
       })
       .parse(req.body);
 
@@ -151,7 +151,7 @@ router.post(
         barcodes: {
           create: {
             value: barcodeValue,
-            symbology: body.symbology || "CODE128",
+            symbology: body.symbology || "QR",
             isPrimary: true,
           },
         },

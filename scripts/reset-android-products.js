@@ -78,7 +78,7 @@ async function main() {
         minStock: 5,
         reorderLevel: 10,
         barcodes: {
-          create: { value: p.barcode, symbology: "CODE128", isPrimary: true },
+          create: { value: p.barcode, symbology: "QR", isPrimary: true },
         },
       },
     });

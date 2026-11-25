@@ -1,5 +1,5 @@
 /**
- * Product barcode labels PDF.
+ * Product QR-code labels PDF.
  * Tries pdfkit+bwip-js; falls back to a simple printable PDF on Vercel.
  */
 async function buildLabelsPdf(labels) {
@@ -28,7 +28,7 @@ async function buildWithPdfKit(labels) {
     doc.on("error", reject);
   });
 
-  doc.font("Helvetica-Bold").fontSize(14).fillColor("#001637").text("STOCKPILOT — Barcode Labels", {
+  doc.font("Helvetica-Bold").fontSize(14).fillColor("#001637").text("STOCKPILOT — QR Code Labels", {
     align: "center",
   });
   doc.moveDown(0.35);
@@ -43,11 +43,12 @@ async function buildWithPdfKit(labels) {
 
   const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const colW = pageWidth / 2 - 8;
+  const rowH = 170;
   let col = 0;
   let y = doc.y;
 
   for (const label of labels) {
-    if (y > doc.page.height - 160) {
+    if (y > doc.page.height - rowH - 20) {
       doc.addPage();
       y = doc.page.margins.top;
       col = 0;
@@ -60,7 +61,7 @@ async function buildWithPdfKit(labels) {
     col += 1;
     if (col >= 2) {
       col = 0;
-      y += 150;
+      y += rowH;
     }
   }
 
@@ -70,7 +71,7 @@ async function buildWithPdfKit(labels) {
 
 async function drawLabelBox(doc, x, y, w, label, bwipjs) {
   doc.save();
-  doc.roundedRect(x, y, w, 140, 6).stroke("#172B4D");
+  doc.roundedRect(x, y, w, 160, 6).stroke("#172B4D");
 
   doc.font("Helvetica-Bold").fontSize(10).fillColor("#001637").text(label.productName || "Product", x + 8, y + 8, {
     width: w - 16,
@@ -80,25 +81,26 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
     width: w - 16,
   });
 
-  const barcodeY = y + 40;
+  const qrSize = 72;
+  const qrX = x + (w - qrSize) / 2;
+  const qrY = y + 38;
   let drew = false;
   if (bwipjs && label.barcodeValue) {
     try {
       const png = await bwipjs.toBuffer({
-        bcid: "code128",
+        bcid: "qrcode",
         text: String(label.barcodeValue),
-        scale: 2,
-        height: 12,
+        scale: 3,
         includetext: false,
       });
-      doc.image(png, x + 12, barcodeY, { width: w - 24, height: 42 });
+      doc.image(png, qrX, qrY, { width: qrSize, height: qrSize });
       drew = true;
     } catch (_) {
       drew = false;
     }
   }
   if (!drew) {
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text(label.barcodeValue || "", x + 8, barcodeY + 16, {
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#000").text(label.barcodeValue || "", x + 8, qrY + 28, {
       width: w - 16,
       align: "center",
     });
@@ -106,9 +108,9 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
 
   doc
     .font("Helvetica")
-    .fontSize(9)
+    .fontSize(8)
     .fillColor("#000")
-    .text(label.barcodeValue || "", x + 8, barcodeY + 46, { width: w - 16, align: "center" });
+    .text(label.barcodeValue || "", x + 8, qrY + qrSize + 4, { width: w - 16, align: "center" });
 
   const meta = [
     label.rack ? `Rack: ${label.rack}` : null,
@@ -121,9 +123,9 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
     .join("  ·  ");
 
   if (meta) {
-    doc.font("Helvetica").fontSize(7).fillColor("#444").text(meta, x + 8, y + 112, {
+    doc.font("Helvetica").fontSize(7).fillColor("#444").text(meta, x + 8, y + 140, {
       width: w - 16,
-      height: 22,
+      height: 16,
       ellipsis: true,
     });
   }
@@ -139,16 +141,16 @@ function buildMinimalLabelsPdf(labels) {
       .replace(/[^\x20-\x7E]/g, "?");
 
   const rows = [
-    "STOCKPILOT - Barcode Labels",
+    "STOCKPILOT - QR Code Labels",
     `Generated ${new Date().toISOString().slice(0, 19)}  |  ${labels.length} label(s)`,
     "",
     ...labels.flatMap((l, i) => [
       `${i + 1}. ${l.productName || "Product"}`,
       `   SKU: ${l.sku || "-"}`,
-      `   BARCODE: ${l.barcodeValue || "-"}`,
+      `   QR: ${l.barcodeValue || "-"}`,
       "",
     ]),
-    "Print this sheet and stick barcodes on products.",
+    "Print this sheet and stick QR codes on products.",
   ];
 
   let content = "BT /F1 11 Tf 50 800 Td 13 TL\n";
