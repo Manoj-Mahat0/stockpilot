@@ -180,7 +180,8 @@ model TransferBatch {
   toSiteId       String              @db.ObjectId
   status         TransferBatchStatus @default(PENDING)
   stockEntryId   String?             @unique @db.ObjectId
-  receiveEntryId String?             @unique @db.ObjectId
+  /// Not unique: MongoDB rejects multiple nulls on unique indexes
+  receiveEntryId String?             @db.ObjectId
   lineSnapshot   Json
   remarks        String?
   createdById    String              @db.ObjectId
