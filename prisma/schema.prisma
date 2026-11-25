@@ -1,0 +1,495 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LocationStatus {
+  ACTIVE
+  BLOCKED
+  INACTIVE
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SessionStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+}
+
+enum AuditStatus {
+  DRAFT
+  IN_PROGRESS
+  PENDING_REVIEW
+  APPROVED
+  CANCELLED
+}
+
+enum TransactionType {
+  OPENING
+  STOCK_IN
+  STOCK_OUT
+  STOCK_TRANSFER
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  RETURN_IN
+  DAMAGE_OUT
+  REVERSAL
+}
+
+enum StockOutPurpose {
+  INTERNAL_CONSUMPTION
+  DEPARTMENT_ISSUE
+  PRODUCTION
+  SALES
+  DISPATCH
+  SAMPLE
+  DAMAGED
+  OTHER
+}
+
+enum AdjustmentReason {
+  DAMAGED
+  EXPIRED
+  LOST
+  FOUND
+  CORRECTION
+  OPENING_BALANCE
+}
+
+enum BarcodeSymbology {
+  CODE128
+  EAN13
+  UPCA
+  QR
+}
+
+enum NotificationType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  EXPIRING
+  STOCK_IN
+  STOCK_OUT
+  ADJUSTMENT
+  AUDIT
+  ADMIN_ALERT
+}
+
+model User {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  employeeId   String     @unique
+  name         String
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  joiningDate  DateTime?
+  department   String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  stockInSessions   StockInSession[]
+  stockOutSessions  StockOutSession[]
+  stockTransactions StockTransaction[]
+  stockAdjustments  StockAdjustment[]
+  stockAudits       StockAudit[]       @relation("AuditCreator")
+  reviewedAudits    StockAudit[]       @relation("AuditReviewer")
+  notifications     Notification[]
+  activityLogs      ActivityLog[]
+  refreshTokens     RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  userId    String   @db.ObjectId
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  name        String     @unique
+  parentId    String?    @db.ObjectId
+  description String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Brand {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Unit {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  name      String    @unique
+  symbol    String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  sku           String        @unique
+  name          String
+  description   String?
+  categoryId    String?       @db.ObjectId
+  brandId       String?       @db.ObjectId
+  unitId        String?       @db.ObjectId
+  purchasePrice Float         @default(0)
+  sellingPrice  Float         @default(0)
+  minStock      Float         @default(0)
+  reorderLevel  Float         @default(0)
+  maxStock      Float?
+  trackBatch    Boolean       @default(false)
+  trackExpiry   Boolean       @default(false)
+  trackSerial   Boolean       @default(false)
+  imageUrl      String?
+  status        ProductStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  category          Category?          @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  brand             Brand?             @relation(fields: [brandId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  unit              Unit?              @relation(fields: [unitId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  barcodes          ProductBarcode[]
+  stockBalances     StockBalance[]
+  stockTransactions StockTransaction[]
+  stockInItems      StockInItem[]
+  stockOutItems     StockOutItem[]
+  stockAdjustments  StockAdjustment[]
+  stockAuditItems   StockAuditItem[]
+}
+
+model ProductBarcode {
+  id        String           @id @default(auto()) @map("_id") @db.ObjectId
+  productId String           @db.ObjectId
+  value     String           @unique
+  symbology BarcodeSymbology @default(CODE128)
+  isPrimary Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Warehouse {
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  code      String     @unique
+  name      String
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  rooms     Room[]
+  locations Location[]
+}
+
+model Room {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  warehouseId String    @db.ObjectId
+  code        String
+  name        String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rows        Row[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([warehouseId, code])
+}
+
+model Row {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  roomId    String   @db.ObjectId
+  code      String
+  name      String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  racks     Rack[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, code])
+}
+
+model Rack {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  rowId     String   @db.ObjectId
+  code      String
+  name      String
+  row       Row      @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  shelves   Shelf[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([rowId, code])
+}
+
+model Shelf {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  rackId    String   @db.ObjectId
+  code      String
+  name      String
+  rack      Rack     @relation(fields: [rackId], references: [id], onDelete: Cascade)
+  bins      Bin[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([rackId, code])
+}
+
+model Bin {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  shelfId   String   @db.ObjectId
+  code      String
+  name      String
+  shelf     Shelf    @relation(fields: [shelfId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shelfId, code])
+}
+
+model Location {
+  id          String         @id @default(auto()) @map("_id") @db.ObjectId
+  warehouseId String         @db.ObjectId
+  code        String         @unique
+  barcode     String         @unique
+  roomCode    String
+  rowCode     String
+  rackCode    String
+  shelfCode   String
+  binCode     String?
+  capacity    Float?
+  status      LocationStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  warehouse         Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stockBalances     StockBalance[]
+  stockTransactions StockTransaction[]
+  stockInItems      StockInItem[]
+  stockOutItems     StockOutItem[]
+  stockAdjustments  StockAdjustment[]
+  stockAuditItems   StockAuditItem[]
+}
+
+model StockBalance {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId  String    @db.ObjectId
+  locationId String    @db.ObjectId
+  batchNo    String    @default("")
+  expiryDate DateTime?
+  quantity   Float     @default(0)
+  updatedAt  DateTime  @updatedAt
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location Location @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([productId, locationId, batchNo])
+}
+
+model StockTransaction {
+  id             String          @id @default(auto()) @map("_id") @db.ObjectId
+  transactionNo  String          @unique
+  type           TransactionType
+  productId      String          @db.ObjectId
+  locationId     String          @db.ObjectId
+  quantityIn     Float           @default(0)
+  quantityOut    Float           @default(0)
+  runningBalance Float
+  batchNo        String?
+  expiryDate     DateTime?
+  reference      String?
+  remarks        String?
+  performedById  String          @db.ObjectId
+  stockInItemId  String?
+  stockOutItemId String?
+  adjustmentId   String?         @db.ObjectId
+  createdAt      DateTime        @default(now())
+
+  product     Product          @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location    Location         @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  performedBy User             @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  adjustment  StockAdjustment? @relation(fields: [adjustmentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model StockInSession {
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  grnNo         String        @unique
+  reference     String?
+  status        SessionStatus @default(DRAFT)
+  remarks       String?
+  performedById String        @db.ObjectId
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  performedBy User          @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items       StockInItem[]
+}
+
+model StockInItem {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId  String    @db.ObjectId
+  productId  String    @db.ObjectId
+  locationId String    @db.ObjectId
+  quantity   Float
+  batchNo    String?
+  expiryDate DateTime?
+  createdAt  DateTime  @default(now())
+
+  session  StockInSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  product  Product        @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location Location       @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model StockOutSession {
+  id            String          @id @default(auto()) @map("_id") @db.ObjectId
+  issueNo       String          @unique
+  issuedTo      String?
+  department    String?
+  purpose       StockOutPurpose @default(DEPARTMENT_ISSUE)
+  reference     String?
+  status        SessionStatus   @default(DRAFT)
+  remarks       String?
+  performedById String          @db.ObjectId
+  completedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  performedBy User           @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items       StockOutItem[]
+}
+
+model StockOutItem {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId  String   @db.ObjectId
+  productId  String   @db.ObjectId
+  locationId String   @db.ObjectId
+  quantity   Float
+  batchNo    String?
+  createdAt  DateTime @default(now())
+
+  session  StockOutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location Location        @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model StockAdjustment {
+  id            String           @id @default(auto()) @map("_id") @db.ObjectId
+  adjustmentNo  String           @unique
+  productId     String           @db.ObjectId
+  locationId    String           @db.ObjectId
+  reason        AdjustmentReason
+  oldQuantity   Float
+  quantityDelta Float
+  newQuantity   Float
+  batchNo       String?
+  remarks       String?
+  performedById String           @db.ObjectId
+  createdAt     DateTime         @default(now())
+
+  product      Product            @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location     Location           @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  performedBy  User               @relation(fields: [performedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions StockTransaction[]
+}
+
+model StockAudit {
+  id           String      @id @default(auto()) @map("_id") @db.ObjectId
+  auditNo      String      @unique
+  title        String
+  status       AuditStatus @default(DRAFT)
+  scope        String      @default("FULL")
+  remarks      String?
+  createdById  String      @db.ObjectId
+  reviewedById String?     @db.ObjectId
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  createdBy  User             @relation("AuditCreator", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reviewedBy User?            @relation("AuditReviewer", fields: [reviewedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items      StockAuditItem[]
+}
+
+model StockAuditItem {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditId          String   @db.ObjectId
+  productId        String   @db.ObjectId
+  locationId       String   @db.ObjectId
+  expectedQuantity Float
+  physicalQuantity Float?
+  variance         Float?
+  remarks          String?
+  createdAt        DateTime @default(now())
+
+  audit    StockAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  product  Product    @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location Location   @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model Notification {
+  id        String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String           @db.ObjectId
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  meta      Json?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String?  @db.ObjectId
+  action    String
+  entity    String?
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model DocumentSequence {
+  id         String @id @default(auto()) @map("_id") @db.ObjectId
+  key        String @unique
+  prefix     String
+  nextNumber Int    @default(1)
+}
+
+model CompanySettings {
+  id              String   @id @default("default") @map("_id")
+  companyName     String   @default("StockPilot")
+  tagline         String   @default("Scan. Track. Control. Everything in Stock.")
+  warehouseLabel  String   @default("Main Warehouse • HQ-01")
+  lowStockEnabled Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+}
