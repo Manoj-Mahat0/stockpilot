@@ -1,9 +1,7 @@
 const express = require("express");
-const PDFDocument = require("pdfkit");
 const { prisma } = require("../config/prisma");
 const { requireAuth, requireAnyAppUser, assertSiteAccess, requireAdmin } = require("../middleware/auth");
 const { asyncHandler, AppError } = require("../utils/errors");
-const { buildLabelsPdf } = require("../utils/labelPdf");
 
 const router = express.Router();
 router.use(requireAuth, requireAnyAppUser);
@@ -50,6 +48,7 @@ router.get(
       })
       .filter(Boolean);
 
+    const { buildLabelsPdf } = require("../utils/labelPdf");
     const pdf = await buildLabelsPdf(labels);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="product-barcodes.pdf"');
@@ -95,6 +94,7 @@ router.get(
 );
 
 async function buildDocumentPdf(doc) {
+  const PDFDocument = require("pdfkit");
   const chunks = [];
   const pdf = new PDFDocument({ size: "A4", margin: 48 });
   pdf.on("data", (c) => chunks.push(c));

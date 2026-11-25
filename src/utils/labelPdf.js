@@ -1,10 +1,16 @@
-const PDFDocument = require("pdfkit");
-const bwipjs = require("bwip-js");
-
 /**
  * One printable PDF page grid of barcode labels (A4, 2 columns).
+ * pdfkit / bwip-js are loaded lazily so Vercel cold start is not blocked.
  */
 async function buildLabelsPdf(labels) {
+  const PDFDocument = require("pdfkit");
+  let bwipjs = null;
+  try {
+    bwipjs = require("bwip-js");
+  } catch (_) {
+    bwipjs = null;
+  }
+
   const doc = new PDFDocument({ size: "A4", margin: 36 });
   const chunks = [];
   doc.on("data", (c) => chunks.push(c));
@@ -32,7 +38,7 @@ async function buildLabelsPdf(labels) {
 
     const x = doc.page.margins.left + col * (colW + 16);
     // eslint-disable-next-line no-await-in-loop
-    await drawLabelBox(doc, x, y, colW, label);
+    await drawLabelBox(doc, x, y, colW, label, bwipjs);
 
     col += 1;
     if (col >= 2) {
@@ -45,7 +51,7 @@ async function buildLabelsPdf(labels) {
   return done;
 }
 
-async function drawLabelBox(doc, x, y, w, label) {
+async function drawLabelBox(doc, x, y, w, label, bwipjs) {
   doc.save();
   doc.roundedRect(x, y, w, 140, 6).stroke("#172B4D");
 
@@ -58,16 +64,23 @@ async function drawLabelBox(doc, x, y, w, label) {
   });
 
   const barcodeY = y + 40;
-  try {
-    const png = await bwipjs.toBuffer({
-      bcid: "code128",
-      text: String(label.barcodeValue || ""),
-      scale: 2,
-      height: 12,
-      includetext: false,
-    });
-    doc.image(png, x + 12, barcodeY, { width: w - 24, height: 42 });
-  } catch {
+  let drew = false;
+  if (bwipjs && label.barcodeValue) {
+    try {
+      const png = await bwipjs.toBuffer({
+        bcid: "code128",
+        text: String(label.barcodeValue),
+        scale: 2,
+        height: 12,
+        includetext: false,
+      });
+      doc.image(png, x + 12, barcodeY, { width: w - 24, height: 42 });
+      drew = true;
+    } catch (_) {
+      drew = false;
+    }
+  }
+  if (!drew) {
     doc.fontSize(11).fillColor("#000").text(label.barcodeValue || "", x + 8, barcodeY + 12, {
       width: w - 16,
       align: "center",
