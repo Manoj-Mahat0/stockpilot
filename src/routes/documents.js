@@ -12,15 +12,24 @@ router.get(
   asyncHandler(async (req, res) => {
     const where = {};
     if (req.query.type) where.type = req.query.type;
-    if (req.user.role !== "ADMIN") {
-      where.siteId = { in: req.user.siteIds };
-    } else if (req.query.siteId) {
-      where.siteId = req.query.siteId;
+
+    if (req.user.role === "ADMIN") {
+      if (req.query.siteId) where.siteId = req.query.siteId;
+    } else {
+      // Own site docs (sales) OR factory challans destined to this site
+      where.OR = [
+        { siteId: { in: req.user.siteIds } },
+        { stockEntry: { destinationSiteId: { in: req.user.siteIds } } },
+      ];
     }
 
     const docs = await prisma.document.findMany({
       where,
-      include: { site: true, createdBy: true, stockEntry: true },
+      include: {
+        site: true,
+        createdBy: true,
+        stockEntry: { include: { destinationSite: true, site: true } },
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
