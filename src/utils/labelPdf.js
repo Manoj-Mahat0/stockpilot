@@ -1,8 +1,17 @@
 /**
- * One printable PDF page grid of barcode labels (A4, 2 columns).
- * pdfkit / bwip-js are loaded lazily so Vercel cold start is not blocked.
+ * Product barcode labels PDF.
+ * Tries pdfkit+bwip-js; falls back to a simple printable PDF on Vercel.
  */
 async function buildLabelsPdf(labels) {
+  try {
+    return await buildWithPdfKit(labels);
+  } catch (err) {
+    console.error("label pdfkit failed, using fallback:", err?.message || err);
+    return buildMinimalLabelsPdf(labels);
+  }
+}
+
+async function buildWithPdfKit(labels) {
   const PDFDocument = require("pdfkit");
   let bwipjs = null;
   try {
@@ -14,14 +23,22 @@ async function buildLabelsPdf(labels) {
   const doc = new PDFDocument({ size: "A4", margin: 36 });
   const chunks = [];
   doc.on("data", (c) => chunks.push(c));
-  const done = new Promise((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+  const done = new Promise((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
 
-  doc.fontSize(14).fillColor("#001637").text("STOCKPILOT — Barcode Labels", { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(14).fillColor("#001637").text("STOCKPILOT — Barcode Labels", {
+    align: "center",
+  });
   doc.moveDown(0.35);
   doc
+    .font("Helvetica")
     .fontSize(9)
     .fillColor("#555")
-    .text(`Generated ${new Date().toLocaleString()}  ·  ${labels.length} label(s)`, { align: "center" });
+    .text(`Generated ${new Date().toISOString().slice(0, 19)}  ·  ${labels.length} label(s)`, {
+      align: "center",
+    });
   doc.fillColor("#000").moveDown(0.8);
 
   const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -55,11 +72,11 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
   doc.save();
   doc.roundedRect(x, y, w, 140, 6).stroke("#172B4D");
 
-  doc.fontSize(10).fillColor("#001637").text(label.productName || "Product", x + 8, y + 8, {
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#001637").text(label.productName || "Product", x + 8, y + 8, {
     width: w - 16,
     ellipsis: true,
   });
-  doc.fontSize(8).fillColor("#555").text(`SKU: ${label.sku || "—"}`, x + 8, y + 24, {
+  doc.font("Helvetica").fontSize(8).fillColor("#555").text(`SKU: ${label.sku || "—"}`, x + 8, y + 24, {
     width: w - 16,
   });
 
@@ -81,13 +98,14 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
     }
   }
   if (!drew) {
-    doc.fontSize(11).fillColor("#000").text(label.barcodeValue || "", x + 8, barcodeY + 12, {
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text(label.barcodeValue || "", x + 8, barcodeY + 16, {
       width: w - 16,
       align: "center",
     });
   }
 
   doc
+    .font("Helvetica")
     .fontSize(9)
     .fillColor("#000")
     .text(label.barcodeValue || "", x + 8, barcodeY + 46, { width: w - 16, align: "center" });
@@ -97,27 +115,71 @@ async function drawLabelBox(doc, x, y, w, label, bwipjs) {
     label.vendor ? `Vendor: ${label.vendor}` : null,
     label.unitCost != null && label.unitCost !== "" ? `Rate: ${label.unitCost}` : null,
     label.batchNo ? `Batch: ${label.batchNo}` : null,
-    label.manufactureDate ? `MFG: ${fmtDate(label.manufactureDate)}` : null,
-    label.expiryDate ? `EXP: ${fmtDate(label.expiryDate)}` : null,
     label.grnNo ? `GRN: ${label.grnNo}` : null,
   ]
     .filter(Boolean)
     .join("  ·  ");
 
-  doc.fontSize(7).fillColor("#444").text(meta, x + 8, y + 112, {
-    width: w - 16,
-    height: 22,
-    ellipsis: true,
-  });
+  if (meta) {
+    doc.font("Helvetica").fontSize(7).fillColor("#444").text(meta, x + 8, y + 112, {
+      width: w - 16,
+      height: 22,
+      ellipsis: true,
+    });
+  }
   doc.restore();
 }
 
-function fmtDate(d) {
-  try {
-    return new Date(d).toISOString().slice(0, 10);
-  } catch {
-    return String(d);
+function buildMinimalLabelsPdf(labels) {
+  const esc = (s) =>
+    String(s ?? "")
+      .replace(/\\/g, "\\\\")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)")
+      .replace(/[^\x20-\x7E]/g, "?");
+
+  const rows = [
+    "STOCKPILOT - Barcode Labels",
+    `Generated ${new Date().toISOString().slice(0, 19)}  |  ${labels.length} label(s)`,
+    "",
+    ...labels.flatMap((l, i) => [
+      `${i + 1}. ${l.productName || "Product"}`,
+      `   SKU: ${l.sku || "-"}`,
+      `   BARCODE: ${l.barcodeValue || "-"}`,
+      "",
+    ]),
+    "Print this sheet and stick barcodes on products.",
+  ];
+
+  let content = "BT /F1 11 Tf 50 800 Td 13 TL\n";
+  rows.forEach((line, i) => {
+    content += i === 0 ? `(${esc(line)}) Tj\n` : `T* (${esc(line)}) Tj\n`;
+  });
+  content += "ET";
+
+  const objects = [];
+  objects.push("1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n");
+  objects.push("2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n");
+  objects.push(
+    "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n"
+  );
+  objects.push(`4 0 obj<< /Length ${Buffer.byteLength(content, "utf8")} >>stream\n${content}\nendstream\nendobj\n`);
+  objects.push("5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n");
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const obj of objects) {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += obj;
   }
+  const xrefStart = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i < offsets.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
 }
 
 function toLabelPayload(item, session) {

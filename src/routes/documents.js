@@ -28,34 +28,34 @@ router.get(
   })
 );
 
-router.get(
-  "/labels/products.pdf",
-  requireAdmin,
-  asyncHandler(async (_req, res) => {
-    const products = await prisma.product.findMany({
-      where: { status: "ACTIVE" },
-      include: { barcodes: true },
-      orderBy: { name: "asc" },
-    });
-    const labels = products
-      .map((p) => {
-        const bc = p.barcodes.find((b) => b.isPrimary) || p.barcodes[0];
-        if (!bc) return null;
-        return {
-          barcodeValue: bc.value,
-          productName: p.name,
-          sku: p.sku,
-        };
-      })
-      .filter(Boolean);
+async function sendProductLabelsPdf(_req, res) {
+  const products = await prisma.product.findMany({
+    where: { status: "ACTIVE" },
+    include: { barcodes: true },
+    orderBy: { name: "asc" },
+  });
+  const labels = products
+    .map((p) => {
+      const bc = p.barcodes.find((b) => b.isPrimary) || p.barcodes[0];
+      if (!bc) return null;
+      return {
+        barcodeValue: bc.value,
+        productName: p.name,
+        sku: p.sku,
+      };
+    })
+    .filter(Boolean);
 
-    const { buildLabelsPdf } = require("../utils/labelPdf");
-    const pdf = await buildLabelsPdf(labels);
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", 'attachment; filename="product-barcodes.pdf"');
-    res.send(pdf);
-  })
-);
+  const { buildLabelsPdf } = require("../utils/labelPdf");
+  const pdf = await buildLabelsPdf(labels);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="product-barcodes.pdf"');
+  res.send(pdf);
+}
+
+// Support both paths (dot in filename can be awkward on some hosts)
+router.get("/labels/products.pdf", requireAdmin, asyncHandler(sendProductLabelsPdf));
+router.get("/labels/products", requireAdmin, asyncHandler(sendProductLabelsPdf));
 
 router.get(
   "/:id/pdf",
